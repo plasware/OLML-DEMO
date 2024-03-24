@@ -1,0 +1,5 @@
+kefu_qa	question,answer	E:/RUC/olml-2024-01-10/table/table_data/kefu_qa.tsv
+imdb	rid,review	E:/RUC/olml-2024-01-10/table/table_data/imdb.tsv
+imdb_reviewer	rid,reviewerid	E:/RUC/olml-2024-01-10/table/table_data/imdb_reviewer.tsv
+imdb_account	reviewerid,rname,follower	E:/RUC/olml-2024-01-10/table/table_data/imdb_account.tsv
+hotel_review	review	E:/RUC/olml-2024-01-10/table/table_data/hotel_review.tsv
