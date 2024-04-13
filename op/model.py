@@ -1,5 +1,6 @@
 import re
 import datasets
+import requests
 from datasets import Dataset, Image
 import evaluate
 import numpy as np
@@ -10,10 +11,12 @@ from transformers import AutoModelForSequenceClassification, AutoTokenizer, Trai
     DataCollatorWithPadding
 from transformers import AutoModelForTokenClassification
 from transformers import AutoImageProcessor, AutoModelForImageClassification
+from transformers import YolosImageProcessor, YolosForObjectDetection, AutoModelForObjectDetection
 from transformers import MarianMTModel, MarianTokenizer
 from transformers import VisionEncoderDecoderModel, ViTImageProcessor
 from sentence_transformers import SentenceTransformer, util, models
 from PIL import Image as _Image
+from PIL import ImageDraw
 
 MODELS_ROOT = 'E:/RUC/olml-2024-01-10/models'
 DATASET_ROOT = 'E:/RUC/olml-2024-01-10/dataset'
@@ -133,7 +136,7 @@ class NERModelCH(DNNModel):
         return self.extract_ner(attrs_for_ner, results)
 
 
-class NERModelEN(DNNModel):
+class NERModelEN(NERModelCH):
     def __init__(self, model_record):
         self.name = model_record[0]
         self.dataset_name = model_record[1]
@@ -146,6 +149,27 @@ class NERModelEN(DNNModel):
         self.model = AutoModelForTokenClassification.from_pretrained(self.model_path, num_labels=len(self.label2id),
                                                                      id2label=self.id2label, label2id=self.label2id)
         self.load_model()
+
+    def compute(self, op_input, attr_values):
+        if self.load != 1:
+            self.load_model()
+        results = []
+        attrs_for_ner = []
+        for attr_value in attr_values:
+            inputs = self.tokenizer(attr_value, return_tensors='pt', truncation=True, padding=True, max_length=128)
+            inputs.to('cuda')
+            with torch.no_grad():
+                logits = self.model(**inputs).logits
+            predictions = torch.argmax(logits, dim=2)
+            predicted_token_class = [self.model.config.id2label[t.item()] for t in predictions[0]]
+            results.append(predicted_token_class)
+
+            attr_for_ner = []
+            for char in attr_value:
+                if char != ' ':
+                    attr_for_ner.append(char)
+            attrs_for_ner.append(' '.join(attr_for_ner))
+        return self.extract_ner(attrs_for_ner, results)
 
 
 class SentenceSimModel(DNNModel):
@@ -243,7 +267,7 @@ class ImageClass2Model(DNNModel):
         for attr_value in attr_values:
             # attr_value contains the path of an image
             dataset = Dataset.from_dict({"image": [attr_value]}).cast_column("image", Image())
-            inputs = self.image_processor(dataset[0]["image"], return_tensors="pt").to("cuda")
+            inputs = self.image_processor(dataset[0]["image"].convert("RGB"), return_tensors="pt").to("cuda")
             with torch.no_grad():
                 logits = self.model(**inputs).logits
             predicted_label = logits.argmax(-1).item()
@@ -297,6 +321,61 @@ class Image2TextModel(DNNModel):
         return results
 
 
+class DigitModel(ImageClass2Model):
+    def __init__(self, model_record):
+        self.name = model_record[0]
+        self.dataset_name = model_record[1]
+        self.model_path = model_record[2]
+        self.load = 0
+        self.image_processor = AutoImageProcessor.from_pretrained(self.model_path)
+        self.label2id = {0: 0, 1: 1, 2: 2, 3: 3, 4: 4, 5: 5, 6: 6, 7: 7, 8: 8, 9: 9}
+        self.id2label = {v: k for k, v in self.label2id.items()}
+        self.model = AutoModelForImageClassification.from_pretrained(self.model_path, num_labels=len(self.label2id),
+                                                                     id2label=self.id2label, label2id=self.label2id)
+        self.load_model()
+
+
+class ObjectDetectionModel(DNNModel):
+    def __init__(self, model_record):
+        self.name = model_record[0]
+        self.dataset_name = model_record[1]
+        self.model_path = model_record[2]
+        self.load = 0
+        # self.image_processor = AutoImageProcessor.from_pretrained(self.model_path)
+        # self.model = AutoModelForObjectDetection.from_pretrained(self.model_path)
+        self.image_processor = YolosImageProcessor.from_pretrained(self.model_path)
+        self.model = YolosForObjectDetection.from_pretrained(self.model_path)
+
+    def compute(self, op_input, attr_values):
+        self.unload_model()
+        return_results = []
+
+        for image_path in attr_values:
+            image = _Image.open(image_path)
+
+            inputs = self.image_processor(images=image, return_tensors="pt")
+            outputs = self.model(**inputs)
+
+            target_sizes = torch.tensor([image.size[::-1]])
+            results = self.image_processor.post_process_object_detection(outputs, threshold=0.9, target_sizes=target_sizes)[0]
+
+            draw = ImageDraw.Draw(image)
+
+            for score, label, box in zip(results["scores"], results["labels"], results["boxes"]):
+                box = [round(i, 2) for i in box.tolist()]
+                draw.rectangle((box[0], box[1], box[2], box[3]), outline="red", width=1)
+                draw.text((box[0], box[1]), self.model.config.id2label[label.item()], fill="white")
+                print(
+                    f"Detected {self.model.config.id2label[label.item()]} with confidence "
+                    f"{round(score.item(), 3)} at location {box}"
+                )
+
+            image.save(image_path)
+            return_results.append(image_path)
+
+        return return_results
+
+
 def get_model_bin_name(dataset_name, op_name):
     return MODELS_ROOT + '/' + dataset_name + '_' + op_name + '.bin'
 
@@ -333,6 +412,8 @@ def train_model(dataset_record, base_model_path):
 
     if dataset_record[-1] == 'SentimentClsCH' or 'SentimentClsEN':
         model = AutoModelForSequenceClassification.from_pretrained(base_model_path)
+    elif dataset_record[-1] == 'NerCH' or 'NerEN':
+        model = AutoModelForTokenClassification.from_pretrained(base_model_path)
     tokenizer = AutoTokenizer.from_pretrained(base_model_path, use_fast=False)
     model.to('cuda')
 

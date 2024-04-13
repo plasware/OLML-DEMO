@@ -6,7 +6,7 @@ import tfidf
 
 op_names = ['SentimentClsCH', 'SentenceSimCH', 'NerCH',
             'SentimentClsEN', 'SentenceSimEN', 'NerEN',
-            'ImageClass2', 'ImageClass3', 'Image2Text',
+            'ImageClass2', 'ImageClass3', 'Image2Text', 'Digit', 'ObjectDetection',
             'TransCH2EN', 'TransEN2CH', 'TransEN2FR', 'TransFR2EN']
 op_dict = {}
 active_ops = []
@@ -35,11 +35,11 @@ class DNNOp:
         # model selection by dataset_name match
         for model in self.model_dict.values():
             if table.name.startswith(model.dataset_name):
-                print("\033[0;32;40mFound Corresponding model at: %s\033[0m" % model.model_path)
+                print("\033[0;32mFound Corresponding model at: %s\033[0m" % model.model_path)
                 return model
             #return model
         # return the first model
-        print("\033[0;33;40mNo Corresponding model. Calculating similar one.\033[0m")
+        print("\033[0;33mNo Corresponding model. Calculating similar one.\033[0m")
 
         return self.select_similar_model(table)
 
@@ -58,7 +58,7 @@ class DNNOp:
             documents.append(document)
         document_test = ".".join('%s' % a for a in table.tuples)
         model_index = tfidf.get_similar_model_index(documents, document_test)
-        print("\033[0;32;40mChoose model %s as infer model\033[0m" % list(self.model_dict.values())[model_index].name)
+        print("\033[0;32mChoose model %s as infer model\033[0m" % list(self.model_dict.values())[model_index].name)
         return list(self.model_dict.values())[model_index]
 
     def compute(self, table, attr_values):
@@ -68,6 +68,7 @@ class DNNOp:
         # print("Using model: %s" % model.model_path)
         return model.compute(self.op_input, attr_values)
 
+        # TODO: add op_input to attr_values
         # if self.op_input is None:
         #  attr_values = ['text_a'] + attr_values
         #  dataset = read_dataset_from_enumerate(self.args, attr_values)
@@ -174,12 +175,28 @@ class ImageClass3(DNNOp):
         self.model_dict = self.load_models(models, ImageClass3Model)
 
 
+class Digit(DNNOp):
+    def __init__(self, name):
+        super(Digit, self).__init__(name)
+
+    def load(self, models):
+        self.model_dict = self.load_models(models, DigitModel)
+
+
 class Image2Text(DNNOp):
     def __init__(self, name):
         super(Image2Text, self).__init__(name)
 
     def load(self, models):
         self.model_dict = self.load_models(models, Image2TextModel)
+
+
+class ObjectDetection(DNNOp):
+    def __init__(self, name):
+        super(ObjectDetection, self).__init__(name)
+
+    def load(self, models):
+        self.model_dict = self.load_models(models, ObjectDetectionModel)
 
 
 def init_ops():
@@ -215,6 +232,10 @@ def init_ops():
             op = ImageClass3(name)
         elif name == 'Image2Text':
             op = Image2Text(name)
+        elif name == 'Digit':
+            op = Digit(name)
+        elif name == 'ObjectDetection':
+            op = ObjectDetection(name)
         op.load(models)
         op_dict[name] = op
         print("    Op: %s inited, load %d models" % (name, len(models)))
